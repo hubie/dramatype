@@ -112,6 +112,10 @@ defmodule DramaType.Typist do
     %{delay: 0, new_text: ""}
   end
 
+  defp process_message({"nl"}, %{printed_text: printed_text} = _state) do
+    %{delay: get_type_delay(), new_text: printed_text <> "<br/>"}
+  end
+
   # backspace
   defp process_message({"bs"}, state) do
     process_message({"bs", get_type_delay()}, state)

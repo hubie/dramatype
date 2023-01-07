@@ -62,7 +62,7 @@ defmodule DramaTypeWeb.TypeLive do
   def render(assigns) do
     ~H"""
       <div class="typist_output" style={config_to_style(@config)}>
-        <%= @printed_text %>
+        <%= raw(@printed_text) %>
       </div>
     """
   end
