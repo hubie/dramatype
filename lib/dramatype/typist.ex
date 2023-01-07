@@ -52,65 +52,79 @@ defmodule DramaType.Typist do
     GenServer.call(process_name(profile), {:process_message, unprocessed_msg: parsed_msg})
   end
 
+
   def handle_call({:get_printed_text}, _from, %{printed_text: printed_text} = state) do
     {:reply, printed_text, state}
   end
 
   def handle_call({:process_message, unprocessed_msg: msg}, _from, state) do
+    IO.inspect("handling first message")
     send(self(), {:process_message})
     {:reply, {:ok}, %{state | unprocessed_msg: msg}}
   end
 
+  def handle_info({:process_message}, %{unprocessed_msg: [msg | tail], typer_profile: profile} = state) when length(tail) == 0 do
+    IO.inspect("Last one")
+    state = case process_message(msg, state) do
+      %{delay: _, new_text: new_text} ->
+        send_new_text(profile, new_text)
+        %{state | printed_text: new_text}
+      _ ->
+        state
+    end
 
-  # delay
-  def handle_info({:process_message}, %{unprocessed_msg: [{"d", val} | tail]} = state) do
-    {:ok, active_timer} = :timer.send_after(val, self(), {:process_message})
-
-    {:noreply, %{state | unprocessed_msg: tail, active_timer: active_timer}}
-    # {:noreply, assign(socket, active_timer: active_timer, unprocessed_msg: tail)}
-    # process_message(tail, socket)
+    {:noreply, %{state | active_timer: nil, unprocessed_msg: []}}
   end
 
-  def handle_info({:process_message}, %{unprocessed_msg: [{"clear"} | tail]} = state) do
-    send(self(), {:process_message})
-    {:noreply, %{state | printed_text: "", unprocessed_msg: tail, active_timer: nil}}
-  end
+  def handle_info({:process_message}, %{unprocessed_msg: [msg | tail], typer_profile: profile} = state) do
+    result = process_message(msg, state)
 
-  # backspace
-  def handle_info({:process_message}, %{unprocessed_msg: [{"bs"} | tail]} = state) do
-    handle_info({:process_message}, %{state | unprocessed_msg: [{"bs", get_type_delay()} | tail]})
-  end
+    state = case result do
+      %{new_text: new_text} ->
+        send_new_text(profile, new_text)
+        %{state | printed_text: new_text}
+      _ ->
+        state
+    end
 
-  def handle_info({:process_message}, %{unprocessed_msg: [{"bs", val} | tail], printed_text: printed_text, typer_profile: profile} = state) do
-    printed_text = printed_text |> String.slice(0..-2//1)
+    IO.inspect(result.delay, label: "Delay")
 
-    {:ok, active_timer} = :timer.send_after(val, self(), {:process_message})
-
-    Phoenix.PubSub.broadcast(DramaType.PubSub, profile, {__MODULE__, %{display_text: printed_text}})
-    {:noreply, %{state | unprocessed_msg: tail, printed_text: printed_text, active_timer: active_timer}}
-  end
-
-  def handle_info({:process_message}, %{unprocessed_msg: [char | tail], printed_text: printed_text, typer_profile: profile} = state) do
-    text_to_print = printed_text <> char
-    IO.inspect(text_to_print, label: to_string(__MODULE__) <> " text to print")
-
-    Phoenix.PubSub.broadcast(DramaType.PubSub, profile, {__MODULE__, %{display_text: text_to_print}})
-
-    {:ok, active_timer} = :timer.send_after(get_type_delay(), self(), {:process_message})
-
-    {:noreply, %{state | active_timer: active_timer, unprocessed_msg: tail, printed_text: text_to_print}}
-  end
-
-
-  def handle_info({:process_message}, %{unprocessed_msg: []} = state) do
-    IO.inspect("DONE!")
-    {:noreply, state}
-    # {:stop, :normal, state}
+    active_timer = Process.send_after(self(), {:process_message}, result.delay)
+    {:noreply, %{state | active_timer: active_timer, unprocessed_msg: tail}}
   end
 
   def handle_info(msg, state) do
     IO.inspect(msg, label: "unhandled msg")
     {:noreply, state}
+  end
+
+  defp send_new_text(profile, new_text) do
+    Phoenix.PubSub.broadcast(DramaType.PubSub, profile, {__MODULE__, %{display_text: new_text}})
+  end
+
+
+  # delay
+  defp process_message({"d", delay_ms}, _state) do
+    %{delay: delay_ms}
+  end
+
+  defp process_message({"clear"}, _state) do
+    %{delay: 0, new_text: ""}
+  end
+
+  # backspace
+  defp process_message({"bs"}, state) do
+    process_message({"bs", get_type_delay()}, state)
+  end
+
+  # backspace, with delay
+  defp process_message({"bs", delay_ms}, %{printed_text: printed_text} = _state) do
+    printed_text = printed_text |> String.slice(0..-2//1)
+    %{delay: delay_ms, new_text: printed_text}
+  end
+
+  defp process_message(char, %{printed_text: printed_text} = _state) do
+    %{delay: get_type_delay(), new_text: printed_text <> char}
   end
 
   defp get_type_delay() do

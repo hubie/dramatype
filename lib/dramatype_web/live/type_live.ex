@@ -37,6 +37,7 @@ defmodule DramaTypeWeb.TypeLive do
     {:noreply, socket}
   end
 
+
   defp config_to_style(config) do
     Enum.reduce([:font_family, :font_size, :text_area_width, :text_area_height], "", fn config_property, acc ->
       acc <> if( nil != (val = Map.get(config, config_property))) do
