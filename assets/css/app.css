@@ -92,11 +92,14 @@ body {
   background-color: #000;
 }
 
+
 .typist_output {
   font-size: 10rem;
   color: #ffff;
   text-shadow: 2px 2px 2px #333;
-  
+  overflow: scroll;
+  display: flex;
+  flex-direction: column-reverse;
 }
 /* http://aleclownes.com/2017/02/01/crt-display.html */
 .typist_output::before {

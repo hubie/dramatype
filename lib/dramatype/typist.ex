@@ -1,11 +1,13 @@
 defmodule DramaType.Typist do
   use GenServer, restart: :transient
+  alias DramaType.Schema.TypistConfig
 
   @initial_state %{
     typer_profile: nil,
     printed_text: "",
     unprocessed_msg: [],
-    active_timer: nil
+    active_timer: nil,
+    config: %{}
   }
 
   def start_link(typerProfile) do
@@ -18,15 +20,40 @@ defmodule DramaType.Typist do
 
 
   def init(profile) do
-    state = %{@initial_state | typer_profile: profile}
+    config = get_config(%{profile: profile})
+    state = %{@initial_state | typer_profile: profile, config: config}
     {:ok, state}
   end
 
-  def do_typing(%{profile: profile, raw_message: raw_message}) do
-    parsed_msg = parse_message(raw_message)
+  defp get_config(%{profile: profile}) do
+    case DramaType.Repo.get_by(TypistConfig, profile: profile) do
+      nil -> %TypistConfig{profile: profile}
+      config -> config
+    end
+  end
+
+  def set_config(%{profile: profile, config: config}) do
+    {:ok, struct} = get_config(%{profile: profile})
+      |> TypistConfig.changeset(config)
+      |> DramaType.Repo.insert_or_update()
+
+    IO.inspect(struct, label: "INSERTED")
+    Phoenix.PubSub.broadcast(DramaType.PubSub, profile, {__MODULE__, %{config: struct}})
+  end
+
+  def get_current_state(%{profile: profile} = args) do
+    %{config: get_config(args), printed_text: GenServer.call(process_name(profile), {:get_printed_text})}
+  end
+
+
+  def do_typing(%{profile: profile, message: parsed_msg}) do
     IO.inspect(parsed_msg, label: "Got message to type out")
 
     GenServer.call(process_name(profile), {:process_message, unprocessed_msg: parsed_msg})
+  end
+
+  def handle_call({:get_printed_text}, _from, %{printed_text: printed_text} = state) do
+    {:reply, printed_text, state}
   end
 
   def handle_call({:process_message, unprocessed_msg: msg}, _from, state) do
@@ -87,36 +114,6 @@ defmodule DramaType.Typist do
   end
 
   defp get_type_delay() do
-    :rand.normal(167, 3000) |> round()
-  end
-
-
-  defp parse_message(raw_message) do
-    # split messages into array of individual letters and {commands}
-    # e.g. "my {d:12}msg" becomes ["m", "y", " ", {"d", 12}, "m", "s", "g"]
-    String.split(raw_message, ~r/{(?<={).*?(?=})}|./, include_captures: true, trim: true)
-    |> parse_tokens()
-  end
-
-  defp parse_tokens(split_msg) do
-    split_msg |> Enum.map(fn m ->
-      cond do
-        String.length(m) == 1 -> m
-        true ->
-          m |> String.trim_leading("{") |> String.trim_trailing("}") |> String.split(":", parts: 2) |> List.to_tuple() |> post_process_cmd()
-      end
-    end)
-  end
-
-  defp post_process_cmd({"bs", val}) do
-    {"bs", String.to_integer(val)}
-  end
-
-  defp post_process_cmd({"d", val}) do
-    {"d", String.to_integer(val)}
-  end
-
-  defp post_process_cmd(cmd) do
-    cmd
+    :rand.normal(167, 3000) |> round() |> max(20)
   end
 end
